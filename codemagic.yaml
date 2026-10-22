@@ -17,3 +17,5 @@ workflows:
       - name: iOS için arşiv oluştur
         script: |
           flutter build ipa --release --no-codesign
+    artifacts:
+      - build/ios/ipa/*.ipa
