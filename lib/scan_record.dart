@@ -1,18 +1,25 @@
 class ScanRecord {
-  const ScanRecord({required this.serial, required this.scannedAt});
+  const ScanRecord({
+    required this.serial,
+    required this.scannedAt,
+    this.note = '',
+  });
 
   final String serial;
   final DateTime scannedAt;
+  final String note;
 
   Map<String, Object> toJson() => {
     'serial': serial,
     'scannedAt': scannedAt.toIso8601String(),
+    'note': note,
   };
 
   factory ScanRecord.fromJson(Map<String, dynamic> json) {
     return ScanRecord(
       serial: json['serial'] as String,
       scannedAt: DateTime.parse(json['scannedAt'] as String),
+      note: json['note'] as String? ?? '',
     );
   }
 }

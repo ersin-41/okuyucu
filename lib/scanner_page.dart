@@ -7,7 +7,7 @@ import 'scan_record.dart';
 class ScannerPage extends StatefulWidget {
   const ScannerPage({super.key, required this.onSave});
 
-  final Future<bool> Function(String serial) onSave;
+  final Future<bool> Function(String serial, String note) onSave;
 
   @override
   State<ScannerPage> createState() => _ScannerPageState();
@@ -16,6 +16,7 @@ class ScannerPage extends StatefulWidget {
 class _ScannerPageState extends State<ScannerPage> {
   final _recognizer = TextRecognizer(script: TextRecognitionScript.latin);
   final _serialController = TextEditingController();
+  final _noteController = TextEditingController();
 
   CameraController? _cameraController;
   List<String> _candidates = [];
@@ -56,7 +57,12 @@ class _ScannerPageState extends State<ScannerPage> {
     final camera = _cameraController;
     if (camera == null || _processing) return;
 
-    setState(() => _processing = true);
+    setState(() {
+      _processing = true;
+      _recognizedText = null;
+      _candidates = [];
+      _serialController.clear();
+    });
     try {
       final picture = await camera.takePicture();
       final result = await _recognizer.processImage(
@@ -67,7 +73,9 @@ class _ScannerPageState extends State<ScannerPage> {
       setState(() {
         _recognizedText = result.text;
         _candidates = candidates;
-        _serialController.text = candidates.length == 1 ? candidates.first : '';
+        if (candidates.length == 1) {
+          _serialController.text = candidates.single;
+        }
       });
       if (result.text.trim().isEmpty) {
         _showMessage(
@@ -93,7 +101,7 @@ class _ScannerPageState extends State<ScannerPage> {
 
     setState(() => _saving = true);
     try {
-      final saved = await widget.onSave(serial);
+      final saved = await widget.onSave(serial, _noteController.text.trim());
       if (!mounted) return;
       if (saved) {
         Navigator.of(context).pop();
@@ -107,6 +115,15 @@ class _ScannerPageState extends State<ScannerPage> {
     }
   }
 
+  void _addCandidateToField(String candidate) {
+    setState(() {
+      _serialController.value = TextEditingValue(
+        text: candidate,
+        selection: TextSelection.collapsed(offset: candidate.length),
+      );
+    });
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -118,6 +135,7 @@ class _ScannerPageState extends State<ScannerPage> {
     _cameraController?.dispose();
     _recognizer.close();
     _serialController.dispose();
+    _noteController.dispose();
     super.dispose();
   }
 
@@ -185,26 +203,40 @@ class _ScannerPageState extends State<ScannerPage> {
                 fillColor: Theme.of(context).colorScheme.surface,
               ),
             ),
-            if (_candidates.length > 1) ...[
+            if (_candidates.isNotEmpty) ...[
               const SizedBox(height: 14),
-              Text(
-                'Okunan olası kodlar',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _candidates
-                    .map(
-                      (candidate) => ActionChip(
-                        label: Text(candidate),
-                        onPressed: () =>
-                            setState(() => _serialController.text = candidate),
-                      ),
-                    )
-                    .toList(),
-              ),
+              if (_candidates.length == 1)
+                OutlinedButton.icon(
+                  onPressed: () => _addCandidateToField(_candidates.single),
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Algılanan numarayı ekle'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(46),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                )
+              else ...[
+                Text(
+                  'Okunan olası kodlar',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _candidates
+                      .map(
+                        (candidate) => ActionChip(
+                          avatar: const Icon(Icons.add_rounded, size: 18),
+                          label: Text(candidate),
+                          onPressed: () => _addCandidateToField(candidate),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
             ],
             if (_recognizedText != null && _candidates.isEmpty) ...[
               const SizedBox(height: 12),
@@ -215,6 +247,30 @@ class _ScannerPageState extends State<ScannerPage> {
                 ),
               ),
             ],
+            const SizedBox(height: 18),
+            Text(
+              'Not (isteğe bağlı)',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _noteController,
+              textCapitalization: TextCapitalization.sentences,
+              minLines: 2,
+              maxLines: 4,
+              decoration: InputDecoration(
+                hintText: 'Bu lastik için not ekleyin',
+                prefixIcon: const Icon(Icons.notes_rounded),
+                alignLabelWithHint: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                filled: true,
+                fillColor: Theme.of(context).colorScheme.surface,
+              ),
+            ),
             const SizedBox(height: 20),
             FilledButton.icon(
               onPressed: _saving ? null : _save,

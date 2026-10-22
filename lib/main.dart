@@ -52,7 +52,9 @@ class _ScanListPageState extends State<ScanListPage> {
   static const _storageKey = 'scanned_tire_serials';
 
   List<ScanRecord> _records = [];
+  final Set<ScanRecord> _selectedRecords = {};
   bool _loading = true;
+  bool _selectionMode = false;
 
   @override
   void initState() {
@@ -85,13 +87,13 @@ class _ScanListPageState extends State<ScanListPage> {
     }
   }
 
-  Future<bool> _saveSerial(String value) async {
+  Future<bool> _saveSerial(String value, String note) async {
     final serial = value.trim().toUpperCase();
     if (serial.isEmpty) return false;
     if (_records.any((record) => record.serial == serial)) return false;
 
     final updated = [
-      ScanRecord(serial: serial, scannedAt: DateTime.now()),
+      ScanRecord(serial: serial, scannedAt: DateTime.now(), note: note),
       ..._records,
     ];
     await _persist(updated);
@@ -129,10 +131,111 @@ class _ScanListPageState extends State<ScanListPage> {
         .toList();
     try {
       await _persist(updated);
-      if (mounted) setState(() => _records = updated);
+      if (mounted) {
+        setState(() {
+          _records = updated;
+          _selectedRecords.remove(record);
+        });
+      }
     } catch (error) {
       if (mounted) _showMessage('Kayıt silinemedi: $error');
     }
+  }
+
+  Future<void> _editRecord(ScanRecord record) async {
+    final updatedRecord = await showDialog<ScanRecord>(
+      context: context,
+      builder: (context) => _EditRecordDialog(
+        record: record,
+        existingSerials: _records
+            .where((item) => !identical(item, record))
+            .map((item) => item.serial)
+            .toSet(),
+      ),
+    );
+    if (updatedRecord == null) return;
+
+    final index = _records.indexOf(record);
+    if (index == -1) return;
+    final updated = [..._records]..[index] = updatedRecord;
+    try {
+      await _persist(updated);
+      if (mounted) setState(() => _records = updated);
+    } catch (error) {
+      if (mounted) _showMessage('Kayıt güncellenemedi: $error');
+    }
+  }
+
+  Future<void> _deleteSelectedRecords() async {
+    if (_selectedRecords.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Seçili kayıtlar silinsin mi?'),
+        content: Text(
+          '${_selectedRecords.length} kayıt kalıcı olarak silinecek.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Seçilenleri sil'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final updated = _records
+        .where((record) => !_selectedRecords.contains(record))
+        .toList();
+    try {
+      await _persist(updated);
+      if (mounted) {
+        setState(() {
+          _records = updated;
+          _selectedRecords.clear();
+          _selectionMode = false;
+        });
+        _showMessage('Seçilen kayıtlar silindi.');
+      }
+    } catch (error) {
+      if (mounted) _showMessage('Seçili kayıtlar silinemedi: $error');
+    }
+  }
+
+  void _toggleSelectionMode() {
+    setState(() {
+      _selectionMode = !_selectionMode;
+      _selectedRecords.clear();
+    });
+  }
+
+  void _toggleRecordSelection(ScanRecord record) {
+    setState(() {
+      if (!_selectionMode) {
+        _selectionMode = true;
+        _selectedRecords.add(record);
+      } else if (!_selectedRecords.add(record)) {
+        _selectedRecords.remove(record);
+      }
+    });
+  }
+
+  void _toggleSelectAll() {
+    setState(() {
+      if (_selectedRecords.length == _records.length) {
+        _selectedRecords.clear();
+      } else {
+        _selectedRecords
+          ..clear()
+          ..addAll(_records);
+      }
+    });
   }
 
   Future<void> _persist(List<ScanRecord> records) async {
@@ -157,6 +260,7 @@ class _ScanListPageState extends State<ScanListPage> {
       sheet.appendRow([
         TextCellValue('Seri Numarası'),
         TextCellValue('Okunma Tarihi'),
+        TextCellValue('Not'),
       ]);
       for (final record in _records.reversed) {
         sheet.appendRow([
@@ -164,6 +268,7 @@ class _ScanListPageState extends State<ScanListPage> {
           TextCellValue(
             DateFormat('dd.MM.yyyy HH:mm').format(record.scannedAt),
           ),
+          TextCellValue(record.note),
         ]);
       }
 
@@ -203,16 +308,51 @@ class _ScanListPageState extends State<ScanListPage> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Lastik Seri Takip',
-          style: TextStyle(fontWeight: FontWeight.w700),
+        title: Text(
+          _selectionMode
+              ? '${_selectedRecords.length} kayıt seçildi'
+              : 'Lastik Seri Takip',
+          style: const TextStyle(fontWeight: FontWeight.w700),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Excel olarak paylaş',
-            onPressed: _loading ? null : _exportRecords,
-            icon: const Icon(Icons.ios_share_rounded),
-          ),
+          if (_selectionMode) ...[
+            IconButton(
+              tooltip: _selectedRecords.length == _records.length
+                  ? 'Seçimi kaldır'
+                  : 'Tümünü seç',
+              onPressed: _records.isEmpty ? null : _toggleSelectAll,
+              icon: Icon(
+                _selectedRecords.length == _records.length
+                    ? Icons.deselect_rounded
+                    : Icons.select_all_rounded,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Seçilenleri sil',
+              onPressed: _selectedRecords.isEmpty
+                  ? null
+                  : _deleteSelectedRecords,
+              icon: const Icon(Icons.delete_sweep_outlined),
+            ),
+            IconButton(
+              tooltip: 'Seçimi iptal et',
+              onPressed: _toggleSelectionMode,
+              icon: const Icon(Icons.close_rounded),
+            ),
+          ] else ...[
+            IconButton(
+              tooltip: 'Kayıtları seç',
+              onPressed: _loading || _records.isEmpty
+                  ? null
+                  : _toggleSelectionMode,
+              icon: const Icon(Icons.checklist_rounded),
+            ),
+            IconButton(
+              tooltip: 'Excel olarak paylaş',
+              onPressed: _loading ? null : _exportRecords,
+              icon: const Icon(Icons.ios_share_rounded),
+            ),
+          ],
           const SizedBox(width: 8),
         ],
       ),
@@ -275,6 +415,14 @@ class _ScanListPageState extends State<ScanListPage> {
                               final record = _records[index];
                               return _RecordTile(
                                 record: record,
+                                selectionMode: _selectionMode,
+                                selected: _selectedRecords.contains(record),
+                                onTap: _selectionMode
+                                    ? () => _toggleRecordSelection(record)
+                                    : null,
+                                onLongPress: () =>
+                                    _toggleRecordSelection(record),
+                                onEdit: () => _editRecord(record),
                                 onDelete: () => _deleteRecord(record),
                               );
                             },
@@ -343,9 +491,22 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _RecordTile extends StatelessWidget {
-  const _RecordTile({required this.record, required this.onDelete});
+  const _RecordTile({
+    required this.record,
+    required this.selectionMode,
+    required this.selected,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onEdit,
+    required this.onDelete,
+  });
 
   final ScanRecord record;
+  final bool selectionMode;
+  final bool selected;
+  final VoidCallback? onTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   @override
@@ -359,14 +520,18 @@ class _RecordTile extends StatelessWidget {
         side: BorderSide(color: theme.colorScheme.outlineVariant),
       ),
       child: ListTile(
+        onTap: onTap,
+        onLongPress: onLongPress,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: CircleAvatar(
-          backgroundColor: theme.colorScheme.primaryContainer,
-          child: Icon(
-            Icons.check_rounded,
-            color: theme.colorScheme.onPrimaryContainer,
-          ),
-        ),
+        leading: selectionMode
+            ? Checkbox(value: selected, onChanged: (value) => onTap?.call())
+            : CircleAvatar(
+                backgroundColor: theme.colorScheme.primaryContainer,
+                child: Icon(
+                  Icons.check_rounded,
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+              ),
         title: Text(
           record.serial,
           style: const TextStyle(
@@ -374,15 +539,133 @@ class _RecordTile extends StatelessWidget {
             letterSpacing: 0.4,
           ),
         ),
-        subtitle: Text(
-          DateFormat('dd.MM.yyyy · HH:mm').format(record.scannedAt),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(DateFormat('dd.MM.yyyy · HH:mm').format(record.scannedAt)),
+            if (record.note.isNotEmpty)
+              Text(record.note, maxLines: 2, overflow: TextOverflow.ellipsis),
+          ],
         ),
-        trailing: IconButton(
-          tooltip: 'Kaydı sil',
-          onPressed: onDelete,
-          icon: const Icon(Icons.delete_outline_rounded),
+        trailing: selectionMode
+            ? null
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Kaydı düzenle',
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                  IconButton(
+                    tooltip: 'Kaydı sil',
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline_rounded),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _EditRecordDialog extends StatefulWidget {
+  const _EditRecordDialog({
+    required this.record,
+    required this.existingSerials,
+  });
+
+  final ScanRecord record;
+  final Set<String> existingSerials;
+
+  @override
+  State<_EditRecordDialog> createState() => _EditRecordDialogState();
+}
+
+class _EditRecordDialogState extends State<_EditRecordDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _serialController;
+  late final TextEditingController _noteController;
+
+  @override
+  void initState() {
+    super.initState();
+    _serialController = TextEditingController(text: widget.record.serial);
+    _noteController = TextEditingController(text: widget.record.note);
+  }
+
+  @override
+  void dispose() {
+    _serialController.dispose();
+    _noteController.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.of(context).pop(
+      ScanRecord(
+        serial: _serialController.text.trim().toUpperCase(),
+        scannedAt: widget.record.scannedAt,
+        note: _noteController.text.trim(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Kaydı düzenle'),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _serialController,
+                textCapitalization: TextCapitalization.characters,
+                autocorrect: false,
+                decoration: const InputDecoration(
+                  labelText: 'Seri numarası',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  final serial = value?.trim().toUpperCase() ?? '';
+                  if (serial.isEmpty) return 'Seri numarası boş olamaz.';
+                  if (widget.existingSerials.contains(serial)) {
+                    return 'Bu seri numarası zaten kayıtlı.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _noteController,
+                textCapitalization: TextCapitalization.sentences,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Not (isteğe bağlı)',
+                  border: OutlineInputBorder(),
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Vazgeç'),
+        ),
+        FilledButton(
+          onPressed: _save,
+          child: const Text('Değişiklikleri kaydet'),
+        ),
+      ],
     );
   }
 }

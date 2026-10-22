@@ -30,11 +30,22 @@ void main() {
     final original = ScanRecord(
       serial: 'AB12CD3456',
       scannedAt: DateTime.utc(2026, 10, 22, 12, 30),
+      note: 'Ön lastik',
     );
 
     final restored = ScanRecord.fromJson(original.toJson());
 
     expect(restored.serial, original.serial);
     expect(restored.scannedAt, original.scannedAt);
+    expect(restored.note, original.note);
+  });
+
+  test('ScanRecord restores older records without a note', () {
+    final restored = ScanRecord.fromJson({
+      'serial': 'AB12CD3456',
+      'scannedAt': '2026-10-22T12:30:00.000Z',
+    });
+
+    expect(restored.note, isEmpty);
   });
 }
