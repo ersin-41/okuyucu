@@ -14,8 +14,6 @@ workflows:
       - name: CocoaPods bağımlılıklarını kur
         script: |
           cd ios && pod install
-      - name: iOS için IPA derle (Kod imzalama olmadan)
+      - name: iOS için arşiv oluştur
         script: |
           flutter build ipa --release --no-codesign
-    artifacts:
-      - build/ios/ipa/*.ipa
