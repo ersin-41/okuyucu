@@ -1,0 +1,21 @@
+workflows:
+  ios-workflow:
+    name: iOS Workflow
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Paketleri yükle
+        script: |
+          flutter pub get
+      - name: CocoaPods bağımlılıklarını kur
+        script: |
+          cd ios && pod install
+      - name: iOS için IPA derle (Kod imzalama olmadan)
+        script: |
+          flutter build ipa --release --no-codesign
+    artifacts:
+      - build/ios/ipa/*.ipa
